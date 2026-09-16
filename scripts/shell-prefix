@@ -1,0 +1,5 @@
+#!/bin/bash
+if [[ "$1" != *" && pwd -P >| "* ]]; then
+  exec /bin/sh -c "$1"
+fi
+exec nvim -l "${BASH_SOURCE%/*}/run.lua" "$1"
