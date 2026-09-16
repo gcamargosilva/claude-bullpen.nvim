@@ -1,4 +1,4 @@
-# bullpen.nvim
+# claude-bullpen.nvim
 
 A bullpen for your Claude Code sessions: all of them warmed up in a Neovim tab, ready to be called in. Browse every session you have, run several at once, and watch what Claude edits and executes while it works.
 
@@ -36,7 +36,7 @@ A bullpen for your Claude Code sessions: all of them warmed up in a Neovim tab, 
 Open Claude Code and paste:
 
 ```
-Install https://github.com/gcamargosilva/bullpen.nvim in my Neovim setup:
+Install https://github.com/gcamargosilva/claude-bullpen.nvim in my Neovim setup:
 
 1. Clone the repo to a temp dir and read README.md.
 2. Check the requirements: Neovim >= 0.11, `claude` on PATH, bash and uuidgen available.
@@ -54,7 +54,7 @@ lazy.nvim / LazyVim:
 
 ```lua
 return {
-  "gcamargosilva/bullpen.nvim",
+  "gcamargosilva/claude-bullpen.nvim",
   main = "claude-sessions",
   cmd = "ClaudeSessions",
   keys = {
@@ -163,7 +163,7 @@ claude ──hooks──────────▶ scripts/hook.lua ──┐
 
 ## Notes
 
-- bullpen.nvim leans on Claude Code internals that may change: the transcript and session file formats, and the shape of Bash tool commands (`eval '…' && pwd -P >| …`) used to recognize them. If that shape changes, commands stop showing in the panel and run under `/bin/sh`.
+- claude-bullpen.nvim leans on Claude Code internals that may change: the transcript and session file formats, and the shape of Bash tool commands (`eval '…' && pwd -P >| …`) used to recognize them. If that shape changes, commands stop showing in the panel and run under `/bin/sh`.
 - Tested on macOS with Neovim 0.11 and Claude Code 2.1.270.
 - Commands running in parallel interleave in the panel.
 - Highlighted lines stay until Claude edits that file again.
