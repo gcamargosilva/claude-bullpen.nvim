@@ -4,6 +4,7 @@ local STATUS_LABELS = { busy = "working" }
 local STATUS_HIGHLIGHTS = { busy = "ClaudeSessionsWorking", idle = "ClaudeSessionsIdle" }
 local NEW_SESSION_TITLE = "new session"
 local QUIT_GUARD_NAME = "Claude Sessions: sessões rodando"
+local MAX_COMMANDS = 50
 
 local M = {}
 
@@ -44,6 +45,7 @@ local state = {
   items_by_line = {},
   entry_lines = {},
   titles_by_id = {},
+  commands_by_channel = {},
 }
 
 local function find_terminal(field, value)
@@ -157,6 +159,16 @@ local function render()
     )
   end
 
+  table.insert(lines, "")
+  add_header("commands")
+  local active_terminal = find_terminal("id", state.active_id)
+  for _, command in ipairs(active_terminal and active_terminal.commands or {}) do
+    local status = command.exit_code == nil and "busy" or command.exit_code ~= 0 and "failed" or nil
+    local detail = command.exit_code == nil and "running · " .. os.time() - command.started_at .. "s"
+      or "exit " .. command.exit_code .. " · " .. command.duration .. "s"
+    add_entry({ key = command.channel, command = command }, status, (command.text:gsub("%s+", " ")), detail, false)
+  end
+
   local cursor_line = vim.api.nvim_win_is_valid(state.sidebar_win) and vim.api.nvim_win_get_cursor(state.sidebar_win)[1]
   local cursor_item = cursor_line and state.items_by_line[cursor_line]
 
@@ -235,7 +247,7 @@ local cycle
 
 local function start_terminal(id, cwd, args)
   local buf = vim.api.nvim_create_buf(false, false)
-  local terminal = { id = id, cwd = cwd, buf = buf }
+  local terminal = { id = id, cwd = cwd, buf = buf, commands = {} }
   table.insert(state.terminals, terminal)
   update_quit_guard()
   vim.api.nvim_win_set_buf(state.terminal_win, buf)
@@ -253,13 +265,13 @@ local function start_terminal(id, cwd, args)
           return other ~= terminal
         end, state.terminals)
         update_quit_guard()
-        for _, exited_buf in ipairs({ buf, terminal.output_buf }) do
-          if vim.api.nvim_buf_is_valid(exited_buf) then
-            vim.bo[exited_buf].bufhidden = "wipe"
-            if #vim.fn.win_findbuf(exited_buf) == 0 then
-              vim.api.nvim_buf_delete(exited_buf, { force = true })
-            end
-          end
+        for _, command in ipairs(terminal.commands) do
+          state.commands_by_channel[command.channel] = nil
+          vim.api.nvim_buf_delete(command.buf, { force = true })
+        end
+        vim.bo[buf].bufhidden = "wipe"
+        if #vim.fn.win_findbuf(buf) == 0 then
+          vim.api.nvim_buf_delete(buf, { force = true })
         end
         render()
       end,
@@ -317,9 +329,27 @@ local function new_session(cwd)
   show(id, cwd, { "--session-id", id })
 end
 
+local function open_command(command)
+  local width = math.floor(vim.o.columns * 0.8)
+  local height = math.floor(vim.o.lines * 0.8)
+  vim.api.nvim_open_win(command.buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = math.floor((vim.o.lines - height) / 2),
+    col = math.floor((vim.o.columns - width) / 2),
+    border = "rounded",
+    title = " " .. vim.fn.strcharpart((command.text:gsub("%s+", " ")), 0, width - 6) .. " ",
+  })
+end
+
 local function open_item()
   local item = state.items_by_line[vim.api.nvim_win_get_cursor(0)[1]]
   if not item then
+    return
+  end
+  if item.command then
+    open_command(item.command)
     return
   end
   if item.session then
@@ -461,24 +491,37 @@ function M.on_hook(terminal_buf, hook_input_json)
   end
 end
 
-function M.command_started(terminal_buf, command)
+function M.command_started(terminal_buf, text)
+  local buf = vim.api.nvim_create_buf(false, true)
+  local command = { text = text, buf = buf, channel = vim.api.nvim_open_term(buf, {}), started_at = os.time() }
+  vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buf })
+  vim.api.nvim_chan_send(command.channel, "\27[1;35m❯ " .. text:gsub("\n", "\r\n") .. "\27[0m\r\n")
+
   local terminal = find_terminal("buf", terminal_buf)
-  if not (terminal.output_buf and vim.api.nvim_buf_is_valid(terminal.output_buf)) then
-    terminal.output_buf = vim.api.nvim_create_buf(false, true)
-    terminal.output_channel = vim.api.nvim_open_term(terminal.output_buf, {})
+  state.commands_by_channel[command.channel] = command
+  table.insert(terminal.commands, 1, command)
+  local dropped = table.remove(terminal.commands, MAX_COMMANDS + 1)
+  if dropped then
+    state.commands_by_channel[dropped.channel] = nil
+    vim.api.nvim_buf_delete(dropped.buf, { force = true })
   end
-  vim.api.nvim_chan_send(terminal.output_channel, "\27[1;35m❯ " .. command:gsub("\n", "\r\n") .. "\27[0m\r\n")
-  show_in_panel(terminal, terminal.output_buf)
-  return terminal.output_channel
+  render()
+  return command.channel
 end
 
-function M.command_output(output_channel, chunk)
-  vim.api.nvim_chan_send(output_channel, (chunk:gsub("\r?\n", "\r\n")))
+function M.command_output(channel, chunk)
+  vim.api.nvim_chan_send(channel, (chunk:gsub("\r?\n", "\r\n")))
 end
 
-function M.command_finished(output_channel, exit_code)
-  local footer = exit_code == 0 and "\27[32m✓\27[0m" or "\27[31m✗ exit " .. exit_code .. "\27[0m"
-  vim.api.nvim_chan_send(output_channel, footer .. "\r\n\r\n")
+function M.command_finished(channel, exit_code)
+  local command = state.commands_by_channel[channel]
+  command.exit_code = exit_code
+  command.duration = os.time() - command.started_at
+  vim.api.nvim_chan_send(
+    channel,
+    exit_code == 0 and "\27[32m✓\27[0m\r\n" or "\27[31m✗ exit " .. exit_code .. "\27[0m\r\n"
+  )
+  render()
 end
 
 function M.toggle()

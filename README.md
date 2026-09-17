@@ -3,24 +3,30 @@
 A bullpen for your Claude Code sessions: all of them warmed up in a Neovim tab, ready to be called in. Browse every session you have, run several at once, and watch what Claude edits and executes while it works.
 
 ```
- spaces                 │ [Fix flaky login test]  Add usage charts  │ ❯ npm test -- login
- ● web-dashboard        │                                           │  PASS  auth/session.test.ts
-   feat/usage-charts    │ ⏺ The retry wraps the whole request,      │  FAIL  auth/login.test.ts
- ○ data-pipeline        │   so the second try reuses an expired     │    ✕ keeps the redirect
-   main                 │   token. Moving it inside the retry.      │ ✗ exit 1
-                        │                                           │
- sessions               │ ⏺ Update(src/auth/login.ts)               │ ❯ npm test -- login
- ● Fix flaky login test │                                           │  PASS  auth/login.test.ts
-   working              │ ⏺ Both login tests pass now.              │ ✓
- ○ Add usage charts     │                                           │
-   2h ago               │ ❯                                         │
+ spaces                 │ [Fix flaky login test]  Add usage charts │ src/auth/login.ts
+ ● web-dashboard        │                                          │
+   feat/usage-charts    │ ⏺ The retry wraps the whole request, so  │  41  async function login(user) {
+ ○ data-pipeline        │   the second try reuses an expired       │  42    const token = await refresh()
+   main                 │   token. Moving it inside the retry.     │  43 ▌  if (token.expired) {
+                        │                                          │  44 ▌    await refresh()
+ sessions               │ ⏺ Update(src/auth/login.ts)              │  45    }
+ ● Fix flaky login test │                                          │
+   working              │ ⏺ Both login tests pass now.             │
+ ○ Add usage charts     │                                          │
+   2h ago               │ ❯                                        │
+                        │                                          │
+ commands               │                                          │
+ ● npm run typecheck    │                                          │
+   running · 3s         │                                          │
+ ○ npm test -- login    │                                          │
+   exit 0 · 12s         │                                          │
 
- sidebar                  Claude Code                                 panel
+ sidebar                  Claude Code                                panel: the file it just changed
 ```
 
 - **Every session in one sidebar.** Grouped by project directory, with git branch, AI title and live status, including sessions running in other terminals.
 - **Run many, switch fast.** Sessions you open become tabs. Hop between them with `<C-,>` / `<C-.>`; hidden ones keep working.
-- **Watch Claude work.** Files Claude writes or edits open on the right with the changed lines highlighted. Every Bash command streams there live, followed by its exit status.
+- **Watch Claude work.** Files Claude writes or edits open on the right with the changed lines highlighted. Every Bash command shows up in the sidebar with its status, and `<CR>` opens its live output in a floating window.
 - **Minimize and get pinged.** `<C-q>` puts the bullpen away. You get a notification when a hidden session finishes or asks for permission.
 - **No accidental kills.** `:qa` refuses to quit while sessions are running.
 - **No global config.** Hooks are passed per session with `--settings`. Claude Code sessions started anywhere else are untouched.
@@ -80,7 +86,7 @@ Other plugin managers: install the repo and call `require("claude-sessions").set
 | Key | Where | Action |
 |---|---|---|
 | `j` / `k` | sidebar | next / previous entry |
-| `<CR>` | sidebar | select space, or open / resume session |
+| `<CR>` | sidebar | select a space, open or resume a session, show a command's output |
 | `n` | sidebar | new session in the selected space |
 | `N` | sidebar | new session in another directory |
 | `x` | sidebar | stop the session under the cursor |
@@ -89,6 +95,7 @@ Other plugin managers: install the repo and call `require("claude-sessions").set
 | `<C-h>` | terminal | focus the sidebar |
 | `<C-.>` / `<C-,>` | terminal | next / previous open session |
 | `<C-q>` | terminal | minimize |
+| `q` | command output | close the floating window |
 
 To close a session, type `/exit` in Claude or press `x` on it in the sidebar. The conversation is saved; `<CR>` on it resumes later.
 
@@ -100,12 +107,21 @@ To close a session, type `/exit` in Claude or press `x` on it in the sidebar. Th
 | green `●` | `idle` | running, waiting for you |
 | `○` | `2h ago` | not running, with its last activity |
 
-### The panel
+### Files
 
-- **Files:** when Claude writes or edits a file, it opens in the panel with the added lines highlighted and the cursor on the change.
-- **Commands:** each Bash command shows up as `❯ command`, streams its output live and ends with `✓` or `✗ exit N`. Claude still receives the output as usual.
+When Claude writes or edits a file, it opens in the panel on the right with the added lines highlighted and the cursor on the change. Each session remembers the last file it touched, so switching sessions switches the panel too. Focus never leaves the Claude terminal.
 
-Each session remembers its own panel, so switching sessions switches the panel too. Focus never leaves the Claude terminal.
+### Commands
+
+Every Bash command the active session runs becomes an entry in the **commands** section of the sidebar, newest first, titled with the command itself:
+
+| Dot | Detail | Meaning |
+|---|---|---|
+| yellow `●` | `running · 12s` | still running |
+| `○` | `exit 0 · 3s` | finished, with how long it took |
+| red `●` | `exit 1 · 3s` | failed |
+
+`<CR>` opens that command's output in a floating window, live while it runs; `q` closes it. Claude still receives the output as usual. The last 50 commands of each session are kept.
 
 ### Notifications and quitting
 
