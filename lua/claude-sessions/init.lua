@@ -11,7 +11,7 @@ local M = {}
 local config = {
   cmd = { "claude" },
   sidebar_width = 36,
-  commands_height = 12,
+  commands_width = 60,
   refresh_interval_ms = 2000,
   keys = {
     open = "<CR>",
@@ -101,16 +101,16 @@ local function ensure_commands_window()
   if state.commands_win and vim.api.nvim_win_is_valid(state.commands_win) then
     return
   end
-  if not (state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win)) then
+  if not (state.terminal_win and vim.api.nvim_win_is_valid(state.terminal_win)) then
     return
   end
   if not (state.commands_buf and vim.api.nvim_buf_is_valid(state.commands_buf)) then
     state.commands_buf = create_panel_buffer()
   end
   state.commands_win = vim.api.nvim_open_win(state.commands_buf, false, {
-    split = "below",
-    win = state.sidebar_win,
-    height = config.commands_height,
+    split = "right",
+    win = state.terminal_win,
+    width = config.commands_width,
   })
   style_window(state.commands_win)
 end
@@ -237,9 +237,21 @@ local function render()
     add_header("commands")
     for _, command in ipairs(active_terminal and active_terminal.commands or {}) do
       local status = command.exit_code == nil and "busy" or command.exit_code ~= 0 and "failed" or nil
-      local detail = command.exit_code == nil and "running · " .. os.time() - command.started_at .. "s"
-        or "exit " .. command.exit_code .. " · " .. command.duration .. "s"
-      add_entry({ key = command.channel, command = command }, status, (command.text:gsub("%s+", " ")), detail, false)
+      local detail
+      if command.path then
+        detail = "edit · " .. time_ago(command.started_at)
+      elseif command.exit_code == nil then
+        detail = "running · " .. os.time() - command.started_at .. "s"
+      else
+        detail = "exit " .. command.exit_code .. " · " .. command.duration .. "s"
+      end
+      add_entry(
+        { key = command.channel or command.path .. command.started_at, command = command },
+        status,
+        (command.text:gsub("%s+", " ")),
+        detail,
+        false
+      )
     end
     paint(state.commands_win, state.commands_buf, lines, marks, items_by_line, entry_lines)
   end
@@ -282,25 +294,6 @@ local function move(direction)
   end
 end
 
-local function show_in_panel(terminal, buf)
-  terminal.panel_buf = buf
-  if terminal.id ~= state.active_id or not vim.api.nvim_win_is_valid(state.terminal_win) then
-    return
-  end
-  if not (state.panel_win and vim.api.nvim_win_is_valid(state.panel_win)) then
-    state.panel_win = vim.api.nvim_open_win(buf, false, { split = "right", win = state.terminal_win })
-  end
-  vim.api.nvim_win_set_buf(state.panel_win, buf)
-end
-
-local function restore_panel(terminal)
-  if terminal and terminal.panel_buf and vim.api.nvim_buf_is_valid(terminal.panel_buf) then
-    show_in_panel(terminal, terminal.panel_buf)
-  elseif state.panel_win and vim.api.nvim_win_is_valid(state.panel_win) then
-    vim.api.nvim_win_close(state.panel_win, false)
-  end
-end
-
 local function update_quit_guard()
   if not (state.quit_guard_buf and vim.api.nvim_buf_is_valid(state.quit_guard_buf)) then
     state.quit_guard_buf = vim.api.nvim_create_buf(false, true)
@@ -333,8 +326,10 @@ local function start_terminal(id, cwd, args)
         end, state.terminals)
         update_quit_guard()
         for _, command in ipairs(terminal.commands) do
-          state.commands_by_channel[command.channel] = nil
-          vim.api.nvim_buf_delete(command.buf, { force = true })
+          if command.channel then
+            state.commands_by_channel[command.channel] = nil
+            vim.api.nvim_buf_delete(command.buf, { force = true })
+          end
         end
         vim.bo[buf].bufhidden = "wipe"
         if #vim.fn.win_findbuf(buf) == 0 then
@@ -373,7 +368,6 @@ local function show(id, cwd, start_args)
     start_terminal(id, cwd, start_args)
   end
   state.active_id = id
-  restore_panel(terminal)
   vim.api.nvim_set_current_win(state.terminal_win)
   render()
 end
@@ -400,7 +394,14 @@ end
 local function open_command(command)
   local width = math.floor(vim.o.columns * 0.8)
   local height = math.floor(vim.o.lines * 0.8)
-  vim.api.nvim_open_win(command.buf, true, {
+  local buf = command.buf
+  if command.path then
+    buf = vim.fn.bufadd(command.path)
+    vim.fn.bufload(buf)
+    vim.bo[buf].buflisted = true
+    vim.cmd.checktime(buf)
+  end
+  local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
     width = width,
     height = height,
@@ -409,6 +410,10 @@ local function open_command(command)
     border = "rounded",
     title = " " .. vim.fn.strcharpart((command.text:gsub("%s+", " ")), 0, width - 6) .. " ",
   })
+  if command.first_changed_line then
+    vim.api.nvim_win_set_cursor(win, { command.first_changed_line, 0 })
+    vim.cmd("normal! zz")
+  end
 end
 
 local function open_item()
@@ -487,7 +492,6 @@ local function open()
   local active_terminal = find_terminal("id", state.active_id)
   if active_terminal then
     vim.api.nvim_win_set_buf(state.terminal_win, active_terminal.buf)
-    restore_panel(active_terminal)
     if #active_terminal.commands > 0 then
       ensure_commands_window()
     end
@@ -507,8 +511,17 @@ local function open()
   )
 end
 
-local function show_changed_file(terminal, hook_input)
-  local buf = vim.fn.bufadd(hook_input.tool_input.file_path)
+local function trim_commands(terminal)
+  local dropped = table.remove(terminal.commands, MAX_COMMANDS + 1)
+  if dropped and dropped.channel then
+    state.commands_by_channel[dropped.channel] = nil
+    vim.api.nvim_buf_delete(dropped.buf, { force = true })
+  end
+end
+
+local function add_file_entry(terminal, hook_input)
+  local path = hook_input.tool_input.file_path
+  local buf = vim.fn.bufadd(path)
   vim.fn.bufload(buf)
   vim.bo[buf].buflisted = true
   vim.cmd.checktime(buf)
@@ -531,24 +544,23 @@ local function show_changed_file(terminal, hook_input)
     end
   end
 
-  show_in_panel(terminal, buf)
-  if
-    state.panel_win
-    and vim.api.nvim_win_is_valid(state.panel_win)
-    and vim.api.nvim_win_get_buf(state.panel_win) == buf
-  then
-    vim.api.nvim_win_set_cursor(state.panel_win, { first_changed_line or 1, 0 })
-    vim.api.nvim_win_call(state.panel_win, function()
-      vim.cmd("normal! zz")
-    end)
-  end
+  table.insert(terminal.commands, 1, {
+    text = vim.fn.fnamemodify(path, ":t"),
+    path = path,
+    first_changed_line = first_changed_line,
+    started_at = os.time(),
+    exit_code = 0,
+  })
+  trim_commands(terminal)
+  ensure_commands_window()
+  render()
 end
 
 function M.on_hook(terminal_buf, hook_input_json)
   local terminal = find_terminal("buf", terminal_buf)
   local hook_input = vim.json.decode(hook_input_json)
   if hook_input.hook_event_name == "PostToolUse" then
-    show_changed_file(terminal, hook_input)
+    add_file_entry(terminal, hook_input)
   elseif vim.api.nvim_get_current_tabpage() ~= state.tab or terminal.id ~= state.active_id then
     local title = state.titles_by_id[terminal.id] or NEW_SESSION_TITLE
     vim.notify(hook_input.message or "terminou", vim.log.levels.INFO, { title = "Claude · " .. title })
@@ -564,11 +576,7 @@ function M.command_started(terminal_buf, text)
   local terminal = find_terminal("buf", terminal_buf)
   state.commands_by_channel[command.channel] = command
   table.insert(terminal.commands, 1, command)
-  local dropped = table.remove(terminal.commands, MAX_COMMANDS + 1)
-  if dropped then
-    state.commands_by_channel[dropped.channel] = nil
-    vim.api.nvim_buf_delete(dropped.buf, { force = true })
-  end
+  trim_commands(terminal)
   ensure_commands_window()
   render()
   return command.channel

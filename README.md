@@ -3,30 +3,24 @@
 A bullpen for your Claude Code sessions: all of them warmed up in a Neovim tab, ready to be called in. Browse every session you have, run several at once, and watch what Claude edits and executes while it works.
 
 ```
- spaces                 │ [Fix flaky login test]  Add usage charts │ src/auth/login.ts
- ● web-dashboard        │                                          │
-   feat/usage-charts    │ ⏺ The retry wraps the whole request, so  │  41  async function login(user) {
- ○ data-pipeline        │   the second try reuses an expired       │  42    const token = await refresh()
-   main                 │   token. Moving it inside the retry.     │  43 ▌  if (token.expired) {
-                        │                                          │  44 ▌    await refresh()
- sessions               │ ⏺ Update(src/auth/login.ts)              │  45    }
- ● Fix flaky login test │                                          │
-   working              │ ⏺ Both login tests pass now.             │
+ spaces                 │ [Fix flaky login test]  Add usage charts │ commands
+ ● web-dashboard        │                                          │ ● npm run typecheck
+   feat/usage-charts    │ ⏺ The retry wraps the whole request, so  │   running · 3s
+ ○ data-pipeline        │   the second try reuses an expired       │ ○ login.ts
+   main                 │   token. Moving it inside the retry.     │   edit · 0m ago
+                        │                                          │ ○ npm test -- login
+ sessions               │ ⏺ Update(src/auth/login.ts)              │   exit 0 · 12s
+ ● Fix flaky login test │                                          │ ● npm run build
+   working              │ ⏺ Both login tests pass now.             │   exit 1 · 8s
  ○ Add usage charts     │                                          │
    2h ago               │ ❯                                        │
-────────────────────────│                                          │
- commands               │                                          │
- ● npm run typecheck    │                                          │
-   running · 3s         │                                          │
- ○ npm test -- login    │                                          │
-   exit 0 · 12s         │                                          │
 
- sidebar + commands       Claude Code                                panel: the file it just changed
+ sidebar                  Claude Code                                commands: <CR> opens the output
 ```
 
 - **Every session in one sidebar.** Grouped by project directory, with git branch, AI title and live status, including sessions running in other terminals.
 - **Run many, switch fast.** Sessions you open become tabs. Hop between them with `<C-,>` / `<C-.>`; hidden ones keep working.
-- **Watch Claude work.** Files Claude writes or edits open on the right with the changed lines highlighted. The first command a session runs opens a commands list under the sidebar, and `<CR>` on one shows its live output in a floating window.
+- **Watch Claude work.** Every Bash command and every file Claude edits shows up in a list on the right, and `<CR>` opens the live output, or the file at the changed line, in a floating window.
 - **Minimize and get pinged.** `<C-q>` puts the bullpen away. You get a notification when a hidden session finishes or asks for permission.
 - **No accidental kills.** `:qa` refuses to quit while sessions are running.
 - **No global config.** Hooks are passed per session with `--settings`. Claude Code sessions started anywhere else are untouched.
@@ -78,7 +72,7 @@ Other plugin managers: install the repo and call `require("claude-sessions").set
 
 1. Pick a space (project directory) with `<CR>`.
 2. Resume a session with `<CR>`, or start one with `n` (`N` asks for a directory).
-3. Talk to Claude in the middle column. The panel on the right follows what it does.
+3. Talk to Claude in the middle column. The list on the right follows what it does.
 4. Press `<C-q>` to put everything away. Sessions keep running.
 
 ### Keys
@@ -86,7 +80,7 @@ Other plugin managers: install the repo and call `require("claude-sessions").set
 | Key | Where | Action |
 |---|---|---|
 | `j` / `k` | sidebar, commands | next / previous entry |
-| `<CR>` | sidebar | select a space, open or resume a session, show a command's output |
+| `<CR>` | sidebar | select a space, resume a session, open a command or file |
 | `n` | sidebar | new session in the selected space |
 | `N` | sidebar | new session in another directory |
 | `x` | sidebar | stop the session under the cursor |
@@ -108,21 +102,18 @@ To close a session, type `/exit` in Claude or press `x` on it in the sidebar. Th
 | green `●` | `idle` | running, waiting for you |
 | `○` | `2h ago` | not running, with its last activity |
 
-### Files
-
-When Claude writes or edits a file, it opens in the panel on the right with the added lines highlighted and the cursor on the change. Each session remembers the last file it touched, so switching sessions switches the panel too. Focus never leaves the Claude terminal.
-
 ### Commands
 
-The first time a session runs a Bash command, a **commands** window opens under the sidebar, listing that session's commands, newest first, titled with the command itself:
+The first time a session runs a Bash command or edits a file, a **commands** window opens on the right, listing what that session did, newest first:
 
 | Dot | Detail | Meaning |
 |---|---|---|
 | yellow `●` | `running · 12s` | still running |
 | `○` | `exit 0 · 3s` | finished, with how long it took |
 | red `●` | `exit 1 · 3s` | failed |
+| `○` | `edit · 2m ago` | a file Claude wrote or edited |
 
-`<CR>` opens that command's output in a floating window, live while it runs; `q` closes it. Claude still receives the output as usual. The last 50 commands of each session are kept.
+`<CR>` opens a command's output in a floating window, live while it runs; `q` closes it. On a file entry it opens the file itself, with the lines Claude added highlighted and the cursor on the first change; close that one with `:q`. Claude still receives command output as usual. The last 50 entries of each session are kept.
 
 The commands window uses the same keys as the sidebar and follows the session you are in. `<C-y>` shows or hides it from the sidebar, from the window itself or from the Claude terminal; closing it with `:q` works too, and the next command opens it again.
 
@@ -139,7 +130,7 @@ Defaults:
 opts = {
   cmd = { "claude" },
   sidebar_width = 36,
-  commands_height = 12,
+  commands_width = 60,
   refresh_interval_ms = 2000,
   keys = {
     open = "<CR>",
