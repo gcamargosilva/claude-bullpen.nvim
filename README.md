@@ -95,6 +95,7 @@ Other plugin managers: install the repo and call `require("claude-sessions").set
 | `<C-h>` | terminal | focus the sidebar |
 | `<C-.>` / `<C-,>` | terminal | next / previous open session |
 | `<C-q>` | terminal | minimize |
+| `<C-y>` | sidebar, commands, terminal | show or hide the commands window |
 | `q` | command output | close the floating window |
 
 To close a session, type `/exit` in Claude or press `x` on it in the sidebar. The conversation is saved; `<CR>` on it resumes later.
@@ -123,7 +124,7 @@ The first time a session runs a Bash command, a **commands** window opens under 
 
 `<CR>` opens that command's output in a floating window, live while it runs; `q` closes it. Claude still receives the output as usual. The last 50 commands of each session are kept.
 
-The commands window uses the same keys as the sidebar, follows the session you are in, and goes away with the session. Close it with `:q` and it stays closed until the next command.
+The commands window uses the same keys as the sidebar and follows the session you are in. `<C-y>` shows or hides it from the sidebar, from the window itself or from the Claude terminal; closing it with `:q` works too, and the next command opens it again.
 
 ### Notifications and quitting
 
@@ -151,6 +152,7 @@ opts = {
     next = "<C-.>",
     prev = "<C-,>",
     minimize = "<C-q>",
+    commands = "<C-y>",
   },
 }
 ```

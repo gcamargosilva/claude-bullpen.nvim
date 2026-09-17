@@ -24,6 +24,7 @@ local config = {
     next = "<C-.>",
     prev = "<C-,>",
     minimize = "<C-q>",
+    commands = "<C-y>",
   },
 }
 
@@ -231,21 +232,16 @@ local function render()
   state.titles_by_id = titles_by_id
 
   local active_terminal = find_terminal("id", state.active_id)
-  local commands = active_terminal and active_terminal.commands or {}
   if state.commands_win and vim.api.nvim_win_is_valid(state.commands_win) then
-    if #commands == 0 then
-      vim.api.nvim_win_close(state.commands_win, true)
-    else
-      lines, marks, items_by_line, entry_lines = {}, {}, {}, {}
-      add_header("commands")
-      for _, command in ipairs(commands) do
-        local status = command.exit_code == nil and "busy" or command.exit_code ~= 0 and "failed" or nil
-        local detail = command.exit_code == nil and "running · " .. os.time() - command.started_at .. "s"
-          or "exit " .. command.exit_code .. " · " .. command.duration .. "s"
-        add_entry({ key = command.channel, command = command }, status, (command.text:gsub("%s+", " ")), detail, false)
-      end
-      paint(state.commands_win, state.commands_buf, lines, marks, items_by_line, entry_lines)
+    lines, marks, items_by_line, entry_lines = {}, {}, {}, {}
+    add_header("commands")
+    for _, command in ipairs(active_terminal and active_terminal.commands or {}) do
+      local status = command.exit_code == nil and "busy" or command.exit_code ~= 0 and "failed" or nil
+      local detail = command.exit_code == nil and "running · " .. os.time() - command.started_at .. "s"
+        or "exit " .. command.exit_code .. " · " .. command.duration .. "s"
+      add_entry({ key = command.channel, command = command }, status, (command.text:gsub("%s+", " ")), detail, false)
     end
+    paint(state.commands_win, state.commands_buf, lines, marks, items_by_line, entry_lines)
   end
 
   if vim.api.nvim_win_is_valid(state.terminal_win) then
@@ -257,6 +253,15 @@ local function render()
     end
     vim.wo[state.terminal_win].winbar = table.concat(tabs, " ")
   end
+end
+
+local function toggle_commands()
+  if state.commands_win and vim.api.nvim_win_is_valid(state.commands_win) then
+    vim.api.nvim_win_close(state.commands_win, true)
+    return
+  end
+  ensure_commands_window()
+  render()
 end
 
 local function move(direction)
@@ -349,6 +354,7 @@ local function start_terminal(id, cwd, args)
   vim.keymap.set("t", config.keys.minimize, function()
     M.toggle()
   end, { buffer = buf })
+  vim.keymap.set("t", config.keys.commands, toggle_commands, { buffer = buf })
   vim.api.nvim_create_autocmd("BufEnter", { buffer = buf, command = "startinsert" })
 end
 
@@ -461,6 +467,7 @@ map_keys = function(buf)
   map(config.keys.focus_terminal, function()
     vim.api.nvim_set_current_win(state.terminal_win)
   end)
+  map(config.keys.commands, toggle_commands)
 end
 
 local function open()
