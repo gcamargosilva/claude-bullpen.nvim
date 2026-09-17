@@ -14,19 +14,19 @@ A bullpen for your Claude Code sessions: all of them warmed up in a Neovim tab, 
    working              │ ⏺ Both login tests pass now.             │
  ○ Add usage charts     │                                          │
    2h ago               │ ❯                                        │
-                        │                                          │
+────────────────────────│                                          │
  commands               │                                          │
  ● npm run typecheck    │                                          │
    running · 3s         │                                          │
  ○ npm test -- login    │                                          │
    exit 0 · 12s         │                                          │
 
- sidebar                  Claude Code                                panel: the file it just changed
+ sidebar + commands       Claude Code                                panel: the file it just changed
 ```
 
 - **Every session in one sidebar.** Grouped by project directory, with git branch, AI title and live status, including sessions running in other terminals.
 - **Run many, switch fast.** Sessions you open become tabs. Hop between them with `<C-,>` / `<C-.>`; hidden ones keep working.
-- **Watch Claude work.** Files Claude writes or edits open on the right with the changed lines highlighted. Every Bash command shows up in the sidebar with its status, and `<CR>` opens its live output in a floating window.
+- **Watch Claude work.** Files Claude writes or edits open on the right with the changed lines highlighted. The first command a session runs opens a commands list under the sidebar, and `<CR>` on one shows its live output in a floating window.
 - **Minimize and get pinged.** `<C-q>` puts the bullpen away. You get a notification when a hidden session finishes or asks for permission.
 - **No accidental kills.** `:qa` refuses to quit while sessions are running.
 - **No global config.** Hooks are passed per session with `--settings`. Claude Code sessions started anywhere else are untouched.
@@ -85,7 +85,7 @@ Other plugin managers: install the repo and call `require("claude-sessions").set
 
 | Key | Where | Action |
 |---|---|---|
-| `j` / `k` | sidebar | next / previous entry |
+| `j` / `k` | sidebar, commands | next / previous entry |
 | `<CR>` | sidebar | select a space, open or resume a session, show a command's output |
 | `n` | sidebar | new session in the selected space |
 | `N` | sidebar | new session in another directory |
@@ -113,7 +113,7 @@ When Claude writes or edits a file, it opens in the panel on the right with the 
 
 ### Commands
 
-Every Bash command the active session runs becomes an entry in the **commands** section of the sidebar, newest first, titled with the command itself:
+The first time a session runs a Bash command, a **commands** window opens under the sidebar, listing that session's commands, newest first, titled with the command itself:
 
 | Dot | Detail | Meaning |
 |---|---|---|
@@ -122,6 +122,8 @@ Every Bash command the active session runs becomes an entry in the **commands** 
 | red `●` | `exit 1 · 3s` | failed |
 
 `<CR>` opens that command's output in a floating window, live while it runs; `q` closes it. Claude still receives the output as usual. The last 50 commands of each session are kept.
+
+The commands window uses the same keys as the sidebar, follows the session you are in, and goes away with the session. Close it with `:q` and it stays closed until the next command.
 
 ### Notifications and quitting
 
@@ -136,6 +138,7 @@ Defaults:
 opts = {
   cmd = { "claude" },
   sidebar_width = 36,
+  commands_height = 12,
   refresh_interval_ms = 2000,
   keys = {
     open = "<CR>",

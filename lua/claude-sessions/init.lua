@@ -11,6 +11,7 @@ local M = {}
 local config = {
   cmd = { "claude" },
   sidebar_width = 36,
+  commands_height = 12,
   refresh_interval_ms = 2000,
   keys = {
     open = "<CR>",
@@ -42,11 +43,12 @@ local changes_namespace = vim.api.nvim_create_namespace("claude-sessions-changes
 
 local state = {
   terminals = {},
-  items_by_line = {},
-  entry_lines = {},
+  panels = {},
   titles_by_id = {},
   commands_by_channel = {},
 }
+
+local map_keys
 
 local function find_terminal(field, value)
   for _, terminal in ipairs(state.terminals) do
@@ -65,6 +67,72 @@ local function time_ago(timestamp)
     return math.floor(elapsed_seconds / 3600) .. "h ago"
   end
   return math.floor(elapsed_seconds / 86400) .. "d ago"
+end
+
+local function style_window(win)
+  for option, value in pairs({
+    number = false,
+    relativenumber = false,
+    signcolumn = "no",
+    foldcolumn = "0",
+    statuscolumn = "",
+    cursorline = true,
+    wrap = false,
+    list = false,
+    spell = false,
+    winfixwidth = true,
+    winfixheight = true,
+  }) do
+    vim.wo[win][0][option] = value
+  end
+end
+
+local function create_panel_buffer()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].filetype = "claude-sessions"
+  vim.api.nvim_create_autocmd("BufEnter", { buffer = buf, command = "stopinsert" })
+  map_keys(buf)
+  return buf
+end
+
+local function ensure_commands_window()
+  if state.commands_win and vim.api.nvim_win_is_valid(state.commands_win) then
+    return
+  end
+  if not (state.sidebar_win and vim.api.nvim_win_is_valid(state.sidebar_win)) then
+    return
+  end
+  if not (state.commands_buf and vim.api.nvim_buf_is_valid(state.commands_buf)) then
+    state.commands_buf = create_panel_buffer()
+  end
+  state.commands_win = vim.api.nvim_open_win(state.commands_buf, false, {
+    split = "below",
+    win = state.sidebar_win,
+    height = config.commands_height,
+  })
+  style_window(state.commands_win)
+end
+
+local function paint(win, buf, lines, marks, items_by_line, entry_lines)
+  local previous = state.panels[buf]
+  local cursor_line = vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_cursor(win)[1]
+  local cursor_item = previous and cursor_line and previous.items_by_line[cursor_line]
+
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.api.nvim_buf_clear_namespace(buf, namespace, 0, -1)
+  for _, mark in ipairs(marks) do
+    vim.api.nvim_buf_set_extmark(buf, namespace, mark[1], mark[2], mark[3])
+  end
+  state.panels[buf] = { items_by_line = items_by_line, entry_lines = entry_lines }
+
+  for _, line in ipairs(entry_lines) do
+    if cursor_item and items_by_line[line].key == cursor_item.key then
+      vim.api.nvim_win_set_cursor(win, { line, 0 })
+    end
+  end
 end
 
 local function render()
@@ -159,31 +227,24 @@ local function render()
     )
   end
 
-  table.insert(lines, "")
-  add_header("commands")
+  paint(state.sidebar_win, state.sidebar_buf, lines, marks, items_by_line, entry_lines)
+  state.titles_by_id = titles_by_id
+
   local active_terminal = find_terminal("id", state.active_id)
-  for _, command in ipairs(active_terminal and active_terminal.commands or {}) do
-    local status = command.exit_code == nil and "busy" or command.exit_code ~= 0 and "failed" or nil
-    local detail = command.exit_code == nil and "running · " .. os.time() - command.started_at .. "s"
-      or "exit " .. command.exit_code .. " · " .. command.duration .. "s"
-    add_entry({ key = command.channel, command = command }, status, (command.text:gsub("%s+", " ")), detail, false)
-  end
-
-  local cursor_line = vim.api.nvim_win_is_valid(state.sidebar_win) and vim.api.nvim_win_get_cursor(state.sidebar_win)[1]
-  local cursor_item = cursor_line and state.items_by_line[cursor_line]
-
-  vim.bo[state.sidebar_buf].modifiable = true
-  vim.api.nvim_buf_set_lines(state.sidebar_buf, 0, -1, false, lines)
-  vim.bo[state.sidebar_buf].modifiable = false
-  vim.api.nvim_buf_clear_namespace(state.sidebar_buf, namespace, 0, -1)
-  for _, mark in ipairs(marks) do
-    vim.api.nvim_buf_set_extmark(state.sidebar_buf, namespace, mark[1], mark[2], mark[3])
-  end
-  state.items_by_line, state.entry_lines, state.titles_by_id = items_by_line, entry_lines, titles_by_id
-
-  for _, line in ipairs(entry_lines) do
-    if cursor_item and items_by_line[line].key == cursor_item.key then
-      vim.api.nvim_win_set_cursor(state.sidebar_win, { line, 0 })
+  local commands = active_terminal and active_terminal.commands or {}
+  if state.commands_win and vim.api.nvim_win_is_valid(state.commands_win) then
+    if #commands == 0 then
+      vim.api.nvim_win_close(state.commands_win, true)
+    else
+      lines, marks, items_by_line, entry_lines = {}, {}, {}, {}
+      add_header("commands")
+      for _, command in ipairs(commands) do
+        local status = command.exit_code == nil and "busy" or command.exit_code ~= 0 and "failed" or nil
+        local detail = command.exit_code == nil and "running · " .. os.time() - command.started_at .. "s"
+          or "exit " .. command.exit_code .. " · " .. command.duration .. "s"
+        add_entry({ key = command.channel, command = command }, status, (command.text:gsub("%s+", " ")), detail, false)
+      end
+      paint(state.commands_win, state.commands_buf, lines, marks, items_by_line, entry_lines)
     end
   end
 
@@ -199,9 +260,10 @@ local function render()
 end
 
 local function move(direction)
+  local panel = state.panels[vim.api.nvim_get_current_buf()]
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
   local target_line
-  for _, line in ipairs(state.entry_lines) do
+  for _, line in ipairs(panel and panel.entry_lines or {}) do
     if direction > 0 and line > cursor_line then
       target_line = line
       break
@@ -344,7 +406,8 @@ local function open_command(command)
 end
 
 local function open_item()
-  local item = state.items_by_line[vim.api.nvim_win_get_cursor(0)[1]]
+  local panel = state.panels[vim.api.nvim_get_current_buf()]
+  local item = panel and panel.items_by_line[vim.api.nvim_win_get_cursor(0)[1]]
   if not item then
     return
   end
@@ -358,41 +421,14 @@ local function open_item()
   end
   state.selected_cwd = item.cwd
   render()
-  if state.items_by_line[state.first_session_line] then
+  if state.panels[state.sidebar_buf].items_by_line[state.first_session_line] then
     vim.api.nvim_win_set_cursor(0, { state.first_session_line, 0 })
   end
 end
 
-local function open()
-  state.selected_cwd = state.selected_cwd or vim.fn.getcwd()
-  vim.cmd.tabnew()
-  state.tab = vim.api.nvim_get_current_tabpage()
-  state.terminal_win = vim.api.nvim_get_current_win()
-  vim.bo.bufhidden = "wipe"
-  vim.cmd("topleft vsplit")
-  state.sidebar_win = vim.api.nvim_get_current_win()
-  state.sidebar_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_win_set_buf(state.sidebar_win, state.sidebar_buf)
-  vim.api.nvim_win_set_width(state.sidebar_win, config.sidebar_width)
-  vim.bo[state.sidebar_buf].bufhidden = "wipe"
-  vim.bo[state.sidebar_buf].filetype = "claude-sessions"
-  for option, value in pairs({
-    number = false,
-    relativenumber = false,
-    signcolumn = "no",
-    foldcolumn = "0",
-    statuscolumn = "",
-    cursorline = true,
-    wrap = false,
-    list = false,
-    spell = false,
-    winfixwidth = true,
-  }) do
-    vim.wo[state.sidebar_win][0][option] = value
-  end
-
+map_keys = function(buf)
   local function map(key, action)
-    vim.keymap.set("n", key, action, { buffer = state.sidebar_buf, nowait = true })
+    vim.keymap.set("n", key, action, { buffer = buf, nowait = true })
   end
   map("j", function()
     move(1)
@@ -412,21 +448,42 @@ local function open()
     end)
   end)
   map(config.keys.stop, function()
-    local item = state.items_by_line[vim.api.nvim_win_get_cursor(0)[1]]
+    local panel = state.panels[buf]
+    local item = panel and panel.items_by_line[vim.api.nvim_win_get_cursor(0)[1]]
     local terminal = item and item.session and find_terminal("id", item.session.id)
     if terminal then
       vim.fn.jobstop(terminal.job_id)
     end
   end)
-  map(config.keys.close, M.toggle)
+  map(config.keys.close, function()
+    M.toggle()
+  end)
   map(config.keys.focus_terminal, function()
     vim.api.nvim_set_current_win(state.terminal_win)
   end)
+end
+
+local function open()
+  state.selected_cwd = state.selected_cwd or vim.fn.getcwd()
+  vim.cmd.tabnew()
+  state.tab = vim.api.nvim_get_current_tabpage()
+  state.terminal_win = vim.api.nvim_get_current_win()
+  vim.bo.bufhidden = "wipe"
+  vim.cmd("topleft vsplit")
+  state.sidebar_win = vim.api.nvim_get_current_win()
+  state.panels = {}
+  state.sidebar_buf = create_panel_buffer()
+  vim.api.nvim_win_set_buf(state.sidebar_win, state.sidebar_buf)
+  vim.api.nvim_win_set_width(state.sidebar_win, config.sidebar_width)
+  style_window(state.sidebar_win)
 
   local active_terminal = find_terminal("id", state.active_id)
   if active_terminal then
     vim.api.nvim_win_set_buf(state.terminal_win, active_terminal.buf)
     restore_panel(active_terminal)
+    if #active_terminal.commands > 0 then
+      ensure_commands_window()
+    end
   end
   render()
   move(1)
@@ -505,6 +562,7 @@ function M.command_started(terminal_buf, text)
     state.commands_by_channel[dropped.channel] = nil
     vim.api.nvim_buf_delete(dropped.buf, { force = true })
   end
+  ensure_commands_window()
   render()
   return command.channel
 end
